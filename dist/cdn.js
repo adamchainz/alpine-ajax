@@ -439,7 +439,7 @@
     if (!response.html)
       return;
     let fragment = document.createRange().createContextualFragment(response.html);
-    targets = targets.map((target) => {
+    let renders = targets.map(async (target) => {
       let template = fragment.getElementById(target.id);
       let strategy = target.getAttribute("x-arrange") || "replace";
       if (!template) {
@@ -450,25 +450,35 @@
           console.warn(`Target #${target.id} not found in AJAX response.`);
         }
         if (response.ok) {
-          return renderElement(strategy, target, target.cloneNode(false));
+          return await renderElement(strategy, target, target.cloneNode(false));
         }
         throw new FailedResponseError(el2);
       }
-      let freshEl = renderElement(strategy, target, template);
+      let freshEl = await renderElement(strategy, target, template);
       if (freshEl) {
         freshEl.removeAttribute("aria-busy");
         freshEl.dataset.source = response.url;
       }
       return freshEl;
     });
+    targets = await Promise.all(renders);
     let focus = el2.getAttribute("x-focus");
     if (focus) {
       focusOn(document.getElementById(focus));
     }
     return targets;
   }
-  function renderElement(strategy, from, to) {
-    return arrange[strategy](from, to);
+  async function renderElement(strategy, from, to) {
+    if (!document.startViewTransition) {
+      return arrange[strategy](from, to);
+    }
+    let freshEl = null;
+    let transition = document.startViewTransition(() => {
+      freshEl = arrange[strategy](from, to);
+      return Promise.resolve();
+    });
+    await transition.updateCallbackDone;
+    return freshEl;
   }
   async function send({ method, action, body, referrer }) {
     let proxy;
@@ -517,6 +527,8 @@
     });
   }
   function focusOn(el2) {
+    if (!el2)
+      return;
     setTimeout(() => {
       if (!el2.hasAttribute("tabindex"))
         el2.setAttribute("tabindex", "0");

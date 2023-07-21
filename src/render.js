@@ -80,7 +80,7 @@ export async function render(request, targets, el, events = true) {
   if (!response.html) return
 
   let fragment = document.createRange().createContextualFragment(response.html)
-  targets = targets.map(target => {
+  let renders = targets.map(async target => {
     let template = fragment.getElementById(target.id)
     let strategy = target.getAttribute('x-arrange') || 'replace'
     if (!template) {
@@ -93,13 +93,13 @@ export async function render(request, targets, el, events = true) {
       }
 
       if (response.ok) {
-        return renderElement(strategy, target, target.cloneNode(false))
+        return await renderElement(strategy, target, target.cloneNode(false))
       }
 
       throw new FailedResponseError(el)
     }
 
-    let freshEl = renderElement(strategy, target, template)
+    let freshEl = await renderElement(strategy, target, template)
 
     if (freshEl) {
       freshEl.removeAttribute('aria-busy')
@@ -109,6 +109,7 @@ export async function render(request, targets, el, events = true) {
     return freshEl
   })
 
+  targets = await Promise.all(renders)
   let focus = el.getAttribute('x-focus')
   if (focus) {
     focusOn(document.getElementById(focus))
@@ -117,8 +118,19 @@ export async function render(request, targets, el, events = true) {
   return targets
 }
 
-function renderElement(strategy, from, to) {
-  return arrange[strategy](from, to)
+async function renderElement(strategy, from, to) {
+  if (!document.startViewTransition) {
+    return arrange[strategy](from, to)
+  }
+
+  let freshEl = null
+  let transition = document.startViewTransition(() => {
+    freshEl = arrange[strategy](from, to)
+    return Promise.resolve()
+  })
+  await transition.updateCallbackDone
+
+  return freshEl
 }
 
 async function send({ method, action, body, referrer }) {
@@ -179,6 +191,7 @@ function readHtml(response) {
 }
 
 function focusOn(el) {
+  if (!el) return
   setTimeout(() => {
     if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0')
     el.focus()
